@@ -1,0 +1,367 @@
+import { useState, useEffect } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
+import { getProfile } from '../redux/slices/profileSlice';
+
+import { clearProfile } from '../redux/slices/profileSlice';
+import { Link, useNavigate } from 'react-router-dom';
+import { toast } from 'react-toastify';
+import logo from '../assets/logo.png';
+import api from '../services/api';
+import JobCard from '../components/JobCard';
+import NotificationDropdown from '../components/NotificationDropdown';
+import { getMediaUrl } from '../utils/formatUrl';
+import LoadingScreen from '../components/LoadingScreen';
+import ProfileCompletionModal from '../components/ProfileCompletionModal';
+import ProfileCompletionBanner from '../components/ProfileCompletionBanner';
+
+
+const EmployerDashboard = () => {
+  const dispatch = useDispatch();
+  const navigate = useNavigate();
+  const { user } = useSelector((state) => state.auth);
+  const { profile, isLoading } = useSelector((state) => state.profile);
+  const [myJobs, setMyJobs] = useState([]);
+  const [stats, setStats] = useState({ totalApplicants: 0, shortlisted: 0, interviews: 0 });
+  const [loadingJobs, setLoadingJobs] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showWelcomeModal, setShowWelcomeModal] = useState(false);
+
+  useEffect(() => {
+    dispatch(getProfile());
+  }, [dispatch]);
+
+  // Calculate company profile completion
+  const isLogoUploaded = !!(profile?.logo && profile.logo !== 'default-company-logo.png');
+  const isDescriptionComplete = !!(profile?.description && profile.description !== 'New verified company registration');
+  const isIndustryComplete = !!(profile?.industry && profile.industry !== 'Other');
+  const isWebsiteComplete = !!(profile?.website);
+  const isLocationComplete = !!(profile?.location?.city || profile?.location?.address);
+
+  const companySections = [isLogoUploaded, isDescriptionComplete, isIndustryComplete, isWebsiteComplete, isLocationComplete];
+  const companyCompletedCount = companySections.filter(Boolean).length;
+  const completionPercentage = profile ? Math.round((companyCompletedCount / companySections.length) * 100) : 0;
+
+  useEffect(() => {
+    if (!isLoading && profile !== undefined) {
+      const modalKey = `cc_welcome_modal_dismissed_${user?._id || user?.id || 'guest'}`;
+      const dismissed = localStorage.getItem(modalKey);
+      if (!dismissed && completionPercentage < 80) {
+        const timer = setTimeout(() => {
+          setShowWelcomeModal(true);
+        }, 500);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [isLoading, profile, user, completionPercentage]);
+
+  const handleDismissModal = () => {
+    setShowWelcomeModal(false);
+    const modalKey = `cc_welcome_modal_dismissed_${user?._id || user?.id || 'guest'}`;
+    localStorage.setItem(modalKey, 'true');
+  };
+
+  useEffect(() => {
+    const fetchMyJobs = async () => {
+      const employerId = user?._id || user?.id;
+      if (!employerId) return;
+      setLoadingJobs(true);
+      try {
+        const [jobsRes, statsRes] = await Promise.all([
+          api.get(`/jobs?employer=${employerId}&sort=-createdAt`),
+          api.get('/applications/stats')
+        ]);
+        
+        setMyJobs(jobsRes.data.data);
+        setStats(statsRes.data.data);
+      } catch (error) {
+        console.error('Error fetching dashboard data', error);
+      } finally {
+        setLoadingJobs(false);
+      }
+    };
+    if (user) {
+      fetchMyJobs();
+    }
+  }, [user]);
+
+
+
+  if (isLoading) {
+    return <LoadingScreen isLoading={true} />;
+  }
+
+  return (
+    <>
+      {/* Profile Completion Modal for Freshly Registered & Incomplete Employers */}
+      <ProfileCompletionModal
+        isOpen={showWelcomeModal}
+        onClose={handleDismissModal}
+        user={user}
+        profile={profile}
+        completionPercentage={completionPercentage}
+      />
+
+      {/* Mobile Sidebar Overlay */}
+      {sidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-black/60 z-40 lg:hidden" 
+          onClick={() => setSidebarOpen(false)}
+        ></div>
+      )}
+      
+      <aside className={`fixed left-0 top-0 h-full w-72 bg-surface-container-low border-r border-white/5 z-50 flex flex-col shadow-2xl transition-transform duration-300 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
+        <div className="p-4 md:p-margin-desktop mb-base flex items-center justify-between">
+          <Link to="/" className="flex items-center gap-2 md:gap-base outline-none focus:outline-none hover:opacity-80 transition-opacity">
+            <img alt="Logo" className="h-8 w-auto" src={logo}/>
+            <span className="text-on-surface font-headline-md text-[18px] md:text-headline-md tracking-tight whitespace-nowrap">Career Connect</span>
+          </Link>
+          <button onClick={() => setSidebarOpen(false)} className="lg:hidden text-on-surface-variant p-1">
+            <span className="material-symbols-outlined">close</span>
+          </button>
+        </div>
+        <nav className="flex-1 px-4 space-y-2 overflow-y-auto">
+          <Link to="/employer-dashboard" onClick={() => setSidebarOpen(false)} aria-current="page" className="flex items-center px-4 md:px-6 py-3 rounded-xl transition-all bg-secondary-container/20 text-secondary border-l-4 border-secondary">
+            <span className="material-symbols-outlined mr-3 md:mr-4">dashboard</span>Dashboard
+          </Link>
+          <Link to="/jobs/new" onClick={() => setSidebarOpen(false)} className="flex items-center px-4 md:px-6 py-3 text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface rounded-xl transition-all border-l-4 border-transparent">
+            <span className="material-symbols-outlined mr-3 md:mr-4">add_box</span>Post a Job
+          </Link>
+          <Link to="/employer/jobs" onClick={() => setSidebarOpen(false)} className="flex items-center px-4 md:px-6 py-3 text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface rounded-xl transition-all border-l-4 border-transparent">
+            <span className="material-symbols-outlined mr-3 md:mr-4">work</span>Posted Jobs
+          </Link>
+        </nav>
+        <div className="p-4 md:p-6 mt-auto">
+          <div className="bg-surface-container-highest p-4 rounded-2xl border border-white/5">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="flex flex-col">
+                <span className="text-body-md font-bold text-on-surface truncate">{user?.name || 'Employer'}</span>
+                <span className="text-label-sm text-on-surface-variant capitalize">{user?.role?.replace('_', ' ')}</span>
+              </div>
+            </div>
+            <Link to="/profile" onClick={() => setSidebarOpen(false)} className="flex items-center text-label-sm text-secondary hover:underline">
+              <span className="material-symbols-outlined text-[16px] mr-1">person</span>Profile
+            </Link>
+          </div>
+        </div>
+      </aside>
+
+      <div className="lg:pl-72 flex flex-col min-h-screen">
+        <header className="fixed top-0 left-0 lg:left-72 right-0 h-20 bg-surface/70 backdrop-blur-xl border-b border-white/5 z-30 flex items-center justify-between px-4 md:px-margin-desktop">
+          <div className="flex items-center gap-3 flex-1">
+            <button onClick={() => setSidebarOpen(true)} className="lg:hidden text-on-surface-variant hover:text-on-surface p-1 flex items-center justify-center">
+              <span className="material-symbols-outlined text-[28px]">menu</span>
+            </button>
+            <div className="flex-1 max-w-md hidden sm:block">
+              <div className="relative flex items-center bg-surface-container-high px-4 py-2 rounded-full border border-white/10">
+                <span className="material-symbols-outlined text-on-surface-variant mr-2">search</span>
+                <input className="bg-transparent border-none outline-none text-on-surface placeholder:text-outline w-full text-body-md" placeholder="Search applicants..." type="text"/>
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 md:gap-gutter ml-auto">
+            <NotificationDropdown />
+            <Link to="/settings" className="flex items-center gap-2 text-on-surface-variant hover:text-secondary transition-colors cursor-pointer">
+              <span className="material-symbols-outlined">settings</span>
+              <span className="font-label-sm text-label-sm">Settings</span>
+            </Link>
+          </div>
+        </header>
+
+        <main className="relative pt-20 bg-background flex-1 flex flex-col">
+          <div className="flex flex-col w-full p-4 md:p-margin-desktop gap-6 md:gap-margin-desktop">
+            
+            {/* Profile Completion Reminder Banner */}
+            <ProfileCompletionBanner
+              user={user}
+              profile={profile}
+              completionPercentage={completionPercentage}
+              onOpenModal={() => setShowWelcomeModal(true)}
+            />
+
+            {/* Welcome Banner */}
+            <section className="relative w-full rounded-3xl overflow-hidden shadow-2xl bg-surface-container flex items-center min-h-[240px]">
+              <div className="absolute inset-0 z-0">
+                <div className="absolute top-[-50%] left-[-20%] w-[100%] h-[200%] bg-gradient-to-br from-secondary/10 via-transparent to-transparent opacity-60 mix-blend-screen blur-3xl transform rotate-12"></div>
+                <div className="absolute bottom-[-50%] right-[-10%] w-[80%] h-[150%] bg-gradient-to-tl from-primary/10 via-transparent to-transparent opacity-50 mix-blend-screen blur-3xl transform -rotate-12"></div>
+              </div>
+              <div className="relative z-10 p-6 md:p-12 flex flex-col md:flex-row items-start md:items-center justify-between w-full gap-8">
+                <div className="flex flex-col max-w-2xl">
+                  <h1 className="font-display-sm md:font-display-lg text-[32px] md:text-display-lg text-on-surface mb-2">Welcome, {user?.name || 'Employer'}.</h1>
+                  <p className="font-body-md md:font-body-lg text-body-md md:text-body-lg text-on-surface-variant">Manage your job postings and find the perfect candidates for your team.</p>
+                </div>
+                <div className="flex flex-col sm:flex-row items-center gap-4 flex-shrink-0 w-full md:w-auto">
+                  {profile ? (
+                    <Link to="/jobs/new" className="w-full sm:w-auto px-6 py-3 rounded-lg bg-secondary text-on-secondary font-label-md text-label-md hover:bg-secondary-fixed-dim transition-colors shadow-lg flex items-center justify-center gap-2 whitespace-nowrap flex-shrink-0">
+                      <span className="material-symbols-outlined">add</span>
+                      Post a New Job
+                    </Link>
+                  ) : (
+                    <Link to="/company/edit" className="w-full sm:w-auto px-6 py-3 rounded-lg bg-primary text-on-primary font-label-md text-label-md hover:bg-primary-fixed-dim transition-colors shadow-lg flex items-center justify-center gap-2 whitespace-nowrap flex-shrink-0">
+                      <span className="material-symbols-outlined">domain</span>
+                      Setup Company Profile
+                    </Link>
+                  )}
+                </div>
+              </div>
+            </section>
+
+            {/* Metrics Row */}
+            <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-gutter w-full">
+              <div className="group relative bg-surface-container rounded-2xl p-6 shadow-md hover:shadow-xl transition-all duration-300 ease-out hover:-translate-y-1 overflow-hidden cursor-default">
+                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-primary/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                <div className="flex items-center justify-between mb-4">
+                  <span className="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">Active Jobs</span>
+                  <div className="w-10 h-10 rounded-full bg-primary-container/20 flex items-center justify-center text-primary group-hover:bg-primary-container/40 transition-colors">
+                    <span className="material-symbols-outlined text-primary text-[20px]" style={{fontVariationSettings: "'FILL' 1"}}>work</span>
+                  </div>
+                </div>
+                <div className="flex items-baseline gap-2">
+                  <span className="font-display-lg text-display-lg text-on-surface">{myJobs.length}</span>
+                  <span className="font-label-sm text-label-sm text-on-surface-variant">postings</span>
+                </div>
+              </div>
+
+              <div className="group relative bg-surface-container rounded-2xl p-6 shadow-md hover:shadow-xl transition-all duration-300 ease-out hover:-translate-y-1 overflow-hidden cursor-default">
+                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-secondary/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                <div className="flex items-center justify-between mb-4">
+                  <span className="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">Total Applicants</span>
+                  <div className="w-10 h-10 rounded-full bg-secondary-container/20 flex items-center justify-center text-secondary group-hover:bg-secondary-container/40 transition-colors">
+                    <span className="material-symbols-outlined text-secondary text-[20px]" style={{fontVariationSettings: "'FILL' 1"}}>group</span>
+                  </div>
+                </div>
+                <div className="flex items-baseline gap-2">
+                  <span className="font-display-lg text-display-lg text-on-surface">{stats.totalApplicants}</span>
+                  <span className="font-label-sm text-label-sm text-on-surface-variant">candidates</span>
+                </div>
+              </div>
+
+              <div className="group relative bg-surface-container rounded-2xl p-6 shadow-md hover:shadow-xl transition-all duration-300 ease-out hover:-translate-y-1 overflow-hidden cursor-default">
+                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-tertiary/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                <div className="flex items-center justify-between mb-4">
+                  <span className="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">Shortlisted</span>
+                  <div className="w-10 h-10 rounded-full bg-tertiary-container/20 flex items-center justify-center text-tertiary group-hover:bg-tertiary-container/40 transition-colors">
+                    <span className="material-symbols-outlined text-tertiary text-[20px]" style={{fontVariationSettings: "'FILL' 1"}}>star</span>
+                  </div>
+                </div>
+                <div className="flex items-baseline gap-2">
+                  <span className="font-display-lg text-display-lg text-on-surface">{stats.shortlisted}</span>
+                  <span className="font-label-sm text-label-sm text-on-surface-variant">candidates</span>
+                </div>
+              </div>
+
+              <Link to="/employer/interviews" className="group relative bg-surface-container rounded-2xl p-6 shadow-md hover:shadow-xl transition-all duration-300 ease-out hover:-translate-y-1 overflow-hidden cursor-pointer block">
+                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-inverse-primary/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                <div className="flex items-center justify-between mb-4">
+                  <span className="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">Interviews</span>
+                  <div className="w-10 h-10 rounded-full bg-surface-bright flex items-center justify-center text-inverse-primary group-hover:bg-inverse-surface transition-colors">
+                    <span className="material-symbols-outlined text-[20px]" style={{fontVariationSettings: "'FILL' 1"}}>event_available</span>
+                  </div>
+                </div>
+                <div className="flex items-baseline gap-2">
+                  <span className="font-display-lg text-display-lg text-on-surface">{stats.interviews}</span>
+                  <span className="font-label-sm text-label-sm text-on-surface-variant">scheduled</span>
+                </div>
+              </Link>
+            </section>
+
+            {/* Two Column Content */}
+            <section className="grid grid-cols-1 xl:grid-cols-12 gap-gutter w-full items-start">
+              {/* Left Column: Recent Job Postings */}
+              <div className="xl:col-span-8 flex flex-col gap-6 w-full" id="recent-jobs">
+                <div className="flex items-center justify-between">
+                  <h2 className="font-headline-md text-headline-md text-on-surface">Recent Job Postings</h2>
+                </div>
+
+                <div className="flex flex-col gap-4">
+                  {!profile ? (
+                    <div className="bg-surface-container rounded-2xl p-8 text-center text-on-surface-variant border border-white/5">
+                      You must complete your company profile before posting jobs.
+                    </div>
+                  ) : loadingJobs ? (
+                    <div className="bg-surface-container rounded-2xl p-6 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-6 opacity-60">
+                      <div className="flex gap-4 items-start sm:items-center w-full max-w-md">
+                        <div className="w-14 h-14 rounded-xl bg-surface-container-highest flex-shrink-0 animate-pulse"></div>
+                        <div className="flex flex-col gap-2 w-full">
+                          <div className="h-6 bg-surface-container-highest rounded w-3/4 animate-pulse"></div>
+                          <div className="h-4 bg-surface-container-highest rounded w-1/2 animate-pulse"></div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : myJobs.length > 0 ? (
+                    myJobs.map(job => (
+                      <JobCard key={job._id} job={job} />
+                    ))
+                  ) : (
+                    <div className="bg-surface-container rounded-2xl p-8 text-center text-on-surface-variant border border-white/5">
+                      You haven't posted any jobs yet. Click "Post a New Job" to get started.
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Right Column: Company Profile */}
+              <aside className="xl:col-span-4 w-full flex flex-col gap-6">
+                <div className="bg-surface-container-high rounded-3xl p-8 shadow-xl relative overflow-hidden border border-white/5">
+                  <div className="absolute -top-12 -right-12 w-32 h-32 bg-secondary/20 rounded-full blur-[40px] pointer-events-none"></div>
+                  <h2 className="font-headline-md text-headline-md text-on-surface mb-6 relative z-10">Company Profile</h2>
+                  
+                  {profile ? (
+                    <div className="flex flex-col gap-6 relative z-10">
+                      <div className="flex items-center gap-4 bg-surface-container rounded-2xl p-4 border border-white/5">
+                        <div className="w-16 h-16 rounded-xl bg-surface-container-highest shrink-0 flex items-center justify-center p-2 shadow-inner overflow-hidden border border-white/10">
+                          {profile.logo && profile.logo !== 'default-company-logo.png' ? (
+                            <img src={getMediaUrl(profile.logo)} alt={profile.name} className="w-full h-full object-cover rounded-lg" />
+                          ) : (
+                            <span className="material-symbols-outlined text-on-surface-variant text-3xl">domain</span>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0 flex flex-col justify-center">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <h3 
+                              className="font-headline-sm text-headline-sm text-on-surface font-semibold truncate tracking-tight text-base sm:text-lg leading-tight" 
+                              title={profile.name}
+                            >
+                              {profile.name}
+                            </h3>
+                            {profile.isVerified && (
+                              <span className="material-symbols-outlined text-green-500 text-[18px] shrink-0" title="Verified Company">verified</span>
+                            )}
+                          </div>
+                          <p className="text-xs text-on-surface-variant truncate mt-0.5 leading-snug" title={profile.industry || 'Industry not set'}>
+                            {profile.industry || 'Industry not set'}
+                          </p>
+                          <div className="flex items-center gap-2 mt-2">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                              profile.status === 'approved' ? 'bg-green-500/20 text-green-500' :
+                              profile.status === 'rejected' ? 'bg-red-500/20 text-red-500' :
+                              'bg-yellow-500/20 text-yellow-500'
+                            }`}>
+                              {profile.status || 'pending'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <Link to="/company/edit" className="w-full py-4 rounded-xl bg-surface-container-lowest text-secondary font-label-sm text-label-sm border border-secondary/20 hover:bg-secondary/10 hover:border-secondary/50 hover:shadow-[0_0_20px_rgba(208,188,255,0.15)] transition-all duration-300 flex items-center justify-center gap-2 group">
+                        <span className="material-symbols-outlined group-hover:rotate-12 transition-transform">edit</span>
+                        Edit Profile
+                      </Link>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-6 text-center relative z-10">
+                      <p className="font-body-md text-body-md text-on-surface-variant">Please set up your company profile to start hiring and posting jobs.</p>
+                      <Link to="/company/edit" className="w-full py-4 rounded-xl bg-secondary text-on-secondary font-label-sm text-label-sm hover:bg-secondary-fixed-dim transition-all shadow-[0_0_15px_rgba(208,188,255,0.3)]">
+                        Setup Company
+                      </Link>
+                    </div>
+                  )}
+                </div>
+              </aside>
+            </section>
+          </div>
+        </main>
+      </div>
+    </>
+  );
+};
+
+export default EmployerDashboard;

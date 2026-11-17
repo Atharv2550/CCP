@@ -1,0 +1,9 @@
+.env
+.env.*
+node_modules/
+uploads/*
+!uploads/.gitkeep
+query_log.txt
+models.json
+.DS_Store
+*.log
